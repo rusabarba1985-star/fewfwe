@@ -1,32 +1,20 @@
 <?php
-// ==================== ДЛЯ RAILWAY: ПОДКЛЮЧЕНИЕ К ПЕРСИСТЕНТНОМУ ТОМУ ====================
-// Если существует папка /data (подключен persistent disk), используем её для БД
-$data_dir = '/data';
-if (!is_dir($data_dir) || !is_writable($data_dir)) {
-    // fallback на локальную папку (для локальной разработки)
-    $data_dir = __DIR__;
-}
-$db_file = $data_dir . '/exolve.db';
+// ==================== ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ ====================
+// Используем папку /data для Railway Volume или локальную папку как запасной вариант
+$db_dir = is_dir('/data') ? '/data' : __DIR__;
+$db_file = $db_dir . '/exolve.db';
 
-// ==================== ОБРАБОТКА ВЕБХУКА ====================
-$is_webhook = false;
-$raw_input = file_get_contents('php://input');
-if ($raw_input && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $data = json_decode($raw_input, true);
-    if ($data && (isset($data['to']) || isset($data['destination']))) {
-        $is_webhook = true;
-    }
-}
-
-// Подключение к БД (SQLite)
 try {
     $pdo = new PDO("sqlite:$db_file");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    
+    // Создание таблиц, если их нет
     $pdo->exec("CREATE TABLE IF NOT EXISTS numbers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         phone TEXT UNIQUE NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
+    
     $pdo->exec("CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         number_id INTEGER NOT NULL,
@@ -36,16 +24,19 @@ try {
         FOREIGN KEY (number_id) REFERENCES numbers(id) ON DELETE CASCADE
     )");
 } catch (PDOException $e) {
-    if ($is_webhook) {
-        http_response_code(500);
-        echo "DB error";
-    } else {
-        die("Database error: " . $e->getMessage());
-    }
-    exit;
+    die("Ошибка базы данных: " . $e->getMessage());
 }
 
-// Если это вебхук — обрабатываем и выходим
+// ==================== ОБРАБОТЧИК ВЕБХУКА ====================
+$is_webhook = false;
+$raw_input = file_get_contents('php://input');
+if ($raw_input && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $data = json_decode($raw_input, true);
+    if ($data && (isset($data['to']) || isset($data['destination']))) {
+        $is_webhook = true;
+    }
+}
+
 if ($is_webhook) {
     $phone_number = null;
     $message_text = null;
@@ -81,9 +72,9 @@ if ($is_webhook) {
     exit;
 }
 
-// ==================== ИНТЕРФЕЙС ====================
-// Добавление номера
+// ==================== АДМИН-ПАНЕЛЬ ====================
 $success = $error = null;
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_number'])) {
     $phone = preg_replace('/[^0-9]/', '', $_POST['phone']);
     if (strlen($phone) >= 10) {
@@ -99,7 +90,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_number'])) {
     }
 }
 
-// Удаление номера
 if (isset($_GET['delete'])) {
     $id = (int)$_GET['delete'];
     $stmt = $pdo->prepare("DELETE FROM numbers WHERE id = ?");
