@@ -1,5 +1,14 @@
 <?php
-// ==================== ВЕБХУК ИЛИ ИНТЕРФЕЙС? ====================
+// ==================== ДЛЯ RAILWAY: ПОДКЛЮЧЕНИЕ К ПЕРСИСТЕНТНОМУ ТОМУ ====================
+// Если существует папка /data (подключен persistent disk), используем её для БД
+$data_dir = '/data';
+if (!is_dir($data_dir) || !is_writable($data_dir)) {
+    // fallback на локальную папку (для локальной разработки)
+    $data_dir = __DIR__;
+}
+$db_file = $data_dir . '/exolve.db';
+
+// ==================== ОБРАБОТКА ВЕБХУКА ====================
 $is_webhook = false;
 $raw_input = file_get_contents('php://input');
 if ($raw_input && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -10,24 +19,33 @@ if ($raw_input && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Подключение к БД (SQLite)
-$db_file = __DIR__ . '/exolve.db';
-$pdo = new PDO("sqlite:$db_file");
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$pdo->exec("CREATE TABLE IF NOT EXISTS numbers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone TEXT UNIQUE NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)");
-$pdo->exec("CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    number_id INTEGER NOT NULL,
-    sender TEXT,
-    text TEXT NOT NULL,
-    received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (number_id) REFERENCES numbers(id) ON DELETE CASCADE
-)");
+try {
+    $pdo = new PDO("sqlite:$db_file");
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec("CREATE TABLE IF NOT EXISTS numbers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT UNIQUE NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        number_id INTEGER NOT NULL,
+        sender TEXT,
+        text TEXT NOT NULL,
+        received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (number_id) REFERENCES numbers(id) ON DELETE CASCADE
+    )");
+} catch (PDOException $e) {
+    if ($is_webhook) {
+        http_response_code(500);
+        echo "DB error";
+    } else {
+        die("Database error: " . $e->getMessage());
+    }
+    exit;
+}
 
-// Обработка вебхука
+// Если это вебхук — обрабатываем и выходим
 if ($is_webhook) {
     $phone_number = null;
     $message_text = null;
